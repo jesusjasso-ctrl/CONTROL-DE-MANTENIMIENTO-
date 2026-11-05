@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <style>
+    :root { --bg: #f6f6f4; --panel: #ffffff; --fg: #1d1d1b; --muted: #66665f; --line: #dcdcd6; --accent: #b3261e; --ok: #1e7a3d; --bad: #b3261e; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #161615; --panel: #20201e; --fg: #ececea; --muted: #a4a49c; --line: #3a3a36; --accent: #ef6a5f; --ok: #6cc28a; --bad: #ef6a5f; color-scheme: dark; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { margin: 0 0 4px; font-size: 22px; font-weight: 600; }
+    .sub { margin: 0 0 20px; color: var(--muted); }
+    form { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 20px; }
+    .campo { display: grid; gap: 4px; min-width: 0; }
+    .ancho { grid-column: 1 / -1; }
+    label { font-size: 13px; color: var(--muted); }
+    label .req { color: var(--accent); }
+    input, select, textarea { width: 100%; font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+    textarea { min-height: 84px; resize: vertical; }
+    input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .acciones { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+    button { font: inherit; font-weight: 600; color: #fff; background: var(--accent); border: 0; border-radius: 6px; padding: 10px 18px; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: progress; }
+    .estado { margin: 0; }
+    .estado.ok { color: var(--ok); }
+    .estado.error { color: var(--bad); }
+    .cargando { color: var(--muted); }
+    .aviso { margin: 0 0 16px; padding: 10px 14px; border: 1px solid var(--accent); border-radius: 6px; background: var(--panel); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Registro de mantenimiento correctivo</h1>
+    <p class="sub">Agrega una unidad a la pestaña MTTO CORRECTIVO. Los días de parada se calculan solos en la hoja.</p>
+    <p class="aviso" id="desde-tablero" hidden>Estos datos vienen del tablero. Revísalos y presiona <b>Registrar unidad</b> para guardarlos en la hoja.</p>
+    <form id="registro" novalidate>
+      <p class="cargando ancho" id="cargando">Cargando campos de la hoja…</p>
+    </form>
+  </main>
+
+  <script>
+    const form = document.getElementById('registro');
+    const iniciales = <?!= datosIniciales ?>;
+    let campos = [];
+
+    function crearCampo(c) {
+      const caja = document.createElement('div');
+      caja.className = 'campo' + (c.tipo === 'textarea' ? ' ancho' : '');
+      const id = 'c' + c.col;
+      const label = document.createElement('label');
+      label.htmlFor = id;
+      label.textContent = c.titulo;
+      if (c.requerido) {
+        const req = document.createElement('span');
+        req.className = 'req';
+        req.textContent = ' *';
+        label.append(req);
+      }
+      let control;
+      if (c.opciones.length) {
+        control = document.createElement('select');
+        control.append(new Option('Elige una opción', ''));
+        c.opciones.forEach((o) => control.append(new Option(o, o)));
+      } else if (c.tipo === 'textarea') {
+        control = document.createElement('textarea');
+      } else {
+        control = document.createElement('input');
+        control.type = c.tipo;
+        if (c.tipo === 'number') { control.step = '0.01'; control.min = '0'; }
+      }
+      control.id = id;
+      control.name = String(c.col);
+      control.required = c.requerido;
+      caja.append(label, control);
+      return caja;
+    }
+
+    function pintar(lista) {
+      campos = lista;
+      const acciones = document.createElement('div');
+      acciones.className = 'acciones';
+      const boton = document.createElement('button');
+      boton.type = 'submit';
+      boton.id = 'guardar';
+      boton.textContent = 'Registrar unidad';
+      const estado = document.createElement('p');
+      estado.className = 'estado';
+      estado.id = 'estado';
+      estado.setAttribute('role', 'status');
+      acciones.append(boton, estado);
+      form.replaceChildren(...lista.map(crearCampo), acciones);
+      const entrada = lista.find((c) => c.requerido && c.tipo === 'date');
+      if (entrada) document.getElementById('c' + entrada.col).valueAsDate = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+      lista.forEach((c) => {
+        const v = c.clave && iniciales[c.clave];
+        if (!v) return;
+        const control = document.getElementById('c' + c.col);
+        if (control.tagName === 'SELECT' && ![...control.options].some((o) => o.value === v)) control.append(new Option(v, v));
+        control.value = v;
+      });
+      document.getElementById('desde-tablero').hidden = !Object.keys(iniciales).length;
+    }
+
+    function aviso(texto, clase) {
+      const estado = document.getElementById('estado');
+      estado.textContent = texto;
+      estado.className = 'estado ' + clase;
+    }
+
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const faltan = campos.filter((c) => c.requerido && !form.elements[String(c.col)].value.trim());
+      if (faltan.length) { aviso('Falta: ' + faltan.map((c) => c.titulo).join(', ') + '.', 'error'); return; }
+      const datos = {};
+      campos.forEach((c) => { datos[c.col] = form.elements[String(c.col)].value; });
+      const boton = document.getElementById('guardar');
+      boton.disabled = true;
+      aviso('Guardando…', '');
+      google.script.run
+        .withSuccessHandler((r) => {
+          boton.disabled = false;
+          campos.forEach((c) => { if (!(c.requerido && c.tipo === 'date')) form.elements[String(c.col)].value = ''; });
+          aviso(`Unidad ${r.placas} registrada en la fila ${r.fila}.`, 'ok');
+        })
+        .withFailureHandler((e) => {
+          boton.disabled = false;
+          aviso(e.message || String(e), 'error');
+        })
+        .registrar(datos);
+    });
+
+    google.script.run
+      .withSuccessHandler(pintar)
+      .withFailureHandler((e) => { document.getElementById('cargando').textContent = 'No se pudieron cargar los campos: ' + (e.message || e); })
+      .obtenerCampos();
+  </script>
+</body>
+</html>
